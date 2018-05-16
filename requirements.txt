@@ -1,0 +1,15 @@
+pytorch-nlp
+visdom
+git+https://github.com/pytorch/ignite.git
+
+
+# Style-checking for PEP8
+flake8
+
+# Unit test
+pytest
+pytest-pythonpath
+
+# Code coverage
+pytest-cov
+codecov
