@@ -1,6 +1,6 @@
 import numpy as np
 
-from ignite import Events
+from ignite.engine import Events
 
 from .visualization import create_plot_window
 

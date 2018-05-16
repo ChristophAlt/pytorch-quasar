@@ -1,7 +1,9 @@
-pytorch-nlp
-visdom
+# Install PyTorch 0.4.0 from http://pytorch.org/
+
 git+https://github.com/pytorch/ignite.git
 
+# Setup.py Install
+-e .
 
 # Style-checking for PEP8
 flake8
@@ -13,3 +15,7 @@ pytest-pythonpath
 # Code coverage
 pytest-cov
 codecov
+coverage
+
+# Release to PyPi
+wheel
