@@ -2,8 +2,8 @@ import numpy as np
 from torch.utils.data.sampler import SubsetRandomSampler
 
 
-def train_test_sampler(dataset, test_size=None, shuffle=True,
-                       random_state=None):
+def train_test_split_sampler(dataset, test_size=None, shuffle=True,
+                             random_state=None):
 
     n_examples = len(dataset)
     indices = list(range(n_examples))

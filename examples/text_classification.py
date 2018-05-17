@@ -16,16 +16,17 @@ from torch.utils.data import DataLoader
 from torchnlp.datasets import trec_dataset
 from torchnlp.samplers import BucketBatchSampler
 from torchnlp.utils import datasets_iterator, pad_batch
-from torchnlp.text_encoders import WhitespaceEncoder, IdentityEncoder
+from torchnlp.text_encoders import WhitespaceEncoder
 from torchnlp import word_to_vector
 
 from test_tube import HyperOptArgumentParser
 
 from distutils.util import strtobool
 
+from quasar.nlp.encoders import LabelEncoder
 from quasar.nlp.utils.data.sampler import FlexibleBucketBatchSampler
 from quasar.train.train_model import train_model
-from quasar.train.utils import train_test_sampler
+from quasar.train.utils import train_test_split_sampler
 
 
 class LSTMClassifier(nn.Module):
@@ -88,10 +89,10 @@ def main():
     parser.add_argument('--tune', type=strtobool, default=False)
     parser.add_argument('--checkpoint', type=strtobool, default=True)
 
-    parser.add_argument('--d_in', type=int, default=300)
     parser.add_argument('--bidirectional', type=strtobool, default=True)
     parser.add_argument('--num_layers', type=int, default=1)
     parser.add_argument('--word_vectors', default='glove.840B.300d')
+    parser.add_argument('--d_embedding', type=int, default=300)
     parser.add_argument('--word_vectors_freeze', type=strtobool, default=True)
     parser.add_argument('--early_stopping', type=strtobool, default=False)
     
@@ -121,7 +122,7 @@ def main():
     text_encoder = WhitespaceEncoder(text_corpus)
 
     label_corpus = [row['label'] for row in datasets_iterator(train, test)]
-    label_encoder = IdentityEncoder(label_corpus, reserved_tokens=[])
+    label_encoder = LabelEncoder(label_corpus)
 
     # encode dataset splits
     for row in datasets_iterator(train, test):
@@ -129,9 +130,9 @@ def main():
         row['label'] = label_encoder.encode(row['label'])
 
     # compute train / dev split for dataloader
-    train_sampler, dev_sampler = train_test_sampler(train,
-                                                    test_size=args.dev_size,
-                                                    random_state=args.seed)
+    train_sampler, dev_sampler = train_test_split_sampler(train,
+                                                          test_size=args.dev_size,
+                                                          random_state=args.seed)
 
     # train function
     def train_f(config):
@@ -173,7 +174,7 @@ def main():
             pin_memory=config.use_cuda,
             num_workers=0)
 
-        embedding = nn.Embedding(text_encoder.vocab_size, config.d_in)
+        embedding = nn.Embedding(text_encoder.vocab_size, config.d_embedding)
 
         if config.word_vectors_freeze:
             embedding.weight.requires_grad = False
@@ -186,7 +187,7 @@ def main():
             print('Found vectors for %d tokens in vocabulary' %
                   len([t for t in text_encoder.vocab if t in word_vectors.stoi]))
 
-        model = LSTMClassifier(d_in=config.d_in,
+        model = LSTMClassifier(d_in=embedding.embedding_dim,
                                d_out=label_encoder.vocab_size,
                                d_hidden=config.d_hidden,
                                dropout=config.dropout,
@@ -202,17 +203,19 @@ def main():
         trainer = create_supervised_trainer(model, optimizer, F.nll_loss,
                                             device=device)
 
-        evaluator_train = create_supervised_evaluator(model,
-                                                metrics={
-                                                    'accuracy': CategoricalAccuracy(),
-                                                    'nll': Loss(F.nll_loss)},
-                                                device=device)
+        evaluator_train = \
+            create_supervised_evaluator(model,
+                                        metrics={
+                                            'accuracy': CategoricalAccuracy(),
+                                            'nll': Loss(F.nll_loss)},
+                                        device=device)
 
-        evaluator_dev = create_supervised_evaluator(model,
-                                                metrics={
-                                                    'accuracy': CategoricalAccuracy(),
-                                                    'nll': Loss(F.nll_loss)},
-                                                device=device)
+        evaluator_dev = \
+            create_supervised_evaluator(model,
+                                        metrics={
+                                            'accuracy': CategoricalAccuracy(),
+                                            'nll': Loss(F.nll_loss)},
+                                        device=device)
 
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer, lambda epoch_: 1. / (1 + 0.05 * (epoch_ - 1)))
@@ -233,7 +236,9 @@ def main():
                                      n_saved=1, create_dir=True, score_name="dev_accuracy")
 
         # lets train!
-        train_model(model=model, trainer=trainer, epochs=config.epochs,
+        train_model(model=model,
+                    trainer=trainer,
+                    epochs=config.epochs,
                     evaluator_train=evaluator_train,
                     evaluator_dev=evaluator_dev,
                     train_loader=train_loader,
@@ -247,11 +252,12 @@ def main():
         model_path = Path('/tmp/models/')
         model = torch.load(list(model_path.glob('checkpoint_model*.pth'))[0])
 
-        test_evaluator = create_supervised_evaluator(model,
-                                                metrics={
-                                                    'accuracy': CategoricalAccuracy(),
-                                                    'nll': Loss(F.nll_loss)},
-                                                device=device)
+        test_evaluator = \
+            create_supervised_evaluator(model,
+                                        metrics={
+                                            'accuracy': CategoricalAccuracy(),
+                                            'nll': Loss(F.nll_loss)},
+                                        device=device)
 
         test_evaluator.run(test_loader)
         metrics = test_evaluator.state.metrics
