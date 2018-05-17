@@ -15,5 +15,8 @@ pytest-cov
 codecov
 coverage
 
+# Mocking
+mock
+
 # Release to PyPi
 wheel
