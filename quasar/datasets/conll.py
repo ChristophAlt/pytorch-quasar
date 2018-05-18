@@ -152,15 +152,17 @@ def conll_dataset(directory='data/',
         train_filename (str, optional): The filename of the training split.
         dev_filename (str, optional): The filename of the dev split.
         test_filename (str, optional): The filename of the test split.
-        check_files (str, optional): Check if these files exist, then this download was successful.
+        check_files (str, optional): Check if these files exist,
+        then this download was successful.
         urls (str, optional): URLs to download.
         tag_scheme (str, optional): The tag scheme of the contained tags (IOB or IOBES).
-        column_names (str, optional): The names of the columns contained in the dataset (defaults to ConLL2003 [text, pos, chunk, entity]).
+        column_names (str, optional): The names of the columns contained in the dataset
+        (defaults to ConLL2003 [text, pos, chunk, entity]).
         use_cols (int, optional): The columns to retain in the dataset (defaults to all).
 
     Returns:
-        :class:`tuple` of :class:`torchnlp.datasets.Dataset`: Tuple with the training tokens, dev
-        tokens and test tokens in order if their respective boolean argument is true.
+        :class:`tuple` of :class:`torchnlp.datasets.Dataset`: Tuple with training tokens,
+        dev tokens and test tokens in order if their respective boolean argument is true.
     """
 
     urls = urls or []
@@ -210,9 +212,12 @@ def conll2003_dataset(directory='data/',
                       test_filename='eng.testb',
                       check_files=['eng.train', 'eng.testa', 'eng.testb'],
                       urls=[
-                          'https://raw.githubusercontent.com/synalp/NER/master/corpus/CoNLL-2003/eng.train'
-                          'https://raw.githubusercontent.com/synalp/NER/master/corpus/CoNLL-2003/eng.testa',
-                          'https://raw.githubusercontent.com/synalp/NER/master/corpus/CoNLL-2003/eng.testb'
+                          'https://raw.githubusercontent.com/synalp/NER/master/' +
+                          'corpus/CoNLL-2003/eng.train'
+                          'https://raw.githubusercontent.com/synalp/NER/master/' +
+                          'corpus/CoNLL-2003/eng.testa',
+                          'https://raw.githubusercontent.com/synalp/NER/master/' +
+                          'corpus/CoNLL-2003/eng.testb'
                       ],
                       tag_scheme=None,
                       column_names=None,
@@ -231,19 +236,20 @@ def conll2003_dataset(directory='data/',
         train_filename (str, optional): The filename of the training split.
         dev_filename (str, optional): The filename of the dev split.
         test_filename (str, optional): The filename of the test split.
-        check_files (str, optional): Check if these files exist, then this download was successful.
+        check_files (str, optional): Check if these files exist, then this download was
+        successful.
         urls (str, optional): URLs to download.
         tag_scheme (str, optional): The tag scheme of the contained tags (IOB or IOBES).
-        column_names (str, optional): The names of the columns contained in the dataset (defaults to ConLL2003 [text, pos, chunk, entity]).
+        column_names (str, optional): The names of the columns contained in the dataset
+        (defaults to ConLL2003 [text, pos, chunk, entity]).
         use_cols (int, optional): The columns to retain in the dataset (defaults to all).
         lower (bool, optional): If to lowercase the text column.
         zero_digits (bool, optional): If to replace digits in the text column with zeros.
 
 
     Returns:
-        :class:`tuple` of :class:`torchnlp.datasets.Dataset`: Tuple with the training tokens, dev
-        tokens and test tokens in order if their respective boolean argument is true.
-
+        :class:`tuple` of :class:`torchnlp.datasets.Dataset`: Tuple with training tokens,
+        dev tokens and test tokens in order if their respective boolean argument is true.
 
     Example:
         >>> from quasar.datasets import conll2003_dataset

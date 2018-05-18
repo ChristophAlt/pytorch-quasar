@@ -7,7 +7,7 @@ def test_trials_to_dimensions():
             {'lr': 1e-2, 'batch_size': 8, 'optim': 'adam', 'large': 3.0},
             {'lr': 1e-4, 'batch_size': 32, 'optim': 'adadelta', 'large': 42.425}
         ]
-    
+
     dimensions = trials_to_dimensions(trials)
 
     print(dimensions)

@@ -19,16 +19,14 @@ from torchnlp.utils import datasets_iterator, pad_batch
 from torchnlp.text_encoders import WhitespaceEncoder
 from torchnlp import word_to_vector
 
-from test_tube import HyperOptArgumentParser
-
-from distutils.util import strtobool
+from skopt.space import Real, Categorical
 
 from quasar.nlp.encoders import LabelEncoder
 from quasar.nlp.utils.data.sampler import FlexibleBucketBatchSampler
 from quasar.train.train_model import train_model
 from quasar.train.utils import train_test_split_sampler
 from quasar.hparams.hp_optimizer import HPOptimizer, Args
-from quasar.visualization.utils import hparams_to_parallel_coordinates
+from quasar.visualization.utils import trials_to_dimensions
 from quasar.visualization.visdom import parallel_coordinates_window
 
 
@@ -125,7 +123,7 @@ def main():
         row['text'] = text_encoder.encode(row['text'])
         row['label'] = label_encoder.encode(row['label'])
 
-    # compute train / dev split for dataloader
+    # create sampler for train / dev split used in dataloader
     train_sampler, dev_sampler = train_test_split_sampler(train,
                                                           test_size=args.dev_size,
                                                           random_state=args.seed)
@@ -137,8 +135,6 @@ def main():
 
     # train function
     def train_f(config):
-        print(config)
-
         model_path = Path('/tmp/models/')
 
         delete_checkpoint(model_path)
@@ -188,7 +184,8 @@ def main():
 
         if config.word_vectors:
             # Load word vectors
-            word_vectors = word_to_vector.aliases[config.word_vectors](cache=config.vector_cache_dir)
+            word_vectors = word_to_vector.aliases[config.word_vectors](
+                cache=config.vector_cache_dir)
             for i, token in enumerate(text_encoder.vocab):
                 embedding.weight.data[i] = word_vectors[token]
             print('Found vectors for %d tokens in vocabulary' %
@@ -233,14 +230,16 @@ def main():
             return -dev_loss
 
         early_stopping = EarlyStopping(patience=15, score_function=score_function,
-                                        trainer=trainer)
+                                       trainer=trainer)
 
         def checkpoint_score_function(engine):
             dev_accuracy = engine.state.metrics['accuracy']
             return dev_accuracy
 
-        checkpoint = ModelCheckpoint('/tmp/models', 'checkpoint', score_function=checkpoint_score_function,
-                                     n_saved=1, create_dir=True, score_name="dev_accuracy")
+        checkpoint = ModelCheckpoint('/tmp/models', 'checkpoint',
+                                     score_function=checkpoint_score_function,
+                                     n_saved=1, create_dir=True,
+                                     score_name="dev_accuracy")
 
         # lets train!
         train_model(model=model,
@@ -275,8 +274,6 @@ def main():
         return metrics['nll']
 
     # hyperparameter tuning!
-    from skopt.space import Real, Integer, Categorical
-
     hp_opt = HPOptimizer(args=args,
                          space=[
                                 Real(0.1, 0.5, name='dropout'),
@@ -284,22 +281,23 @@ def main():
                                 Real(1e-4, 1, prior='log-uniform', name='lr'),
                                 Real(1e-3, 1, prior='log-uniform', name='lr_decay'),
                                 Categorical([4, 8, 16, 32, 64, 128], name='batch_size')
-                            ]
-                        )
+                            ])
 
-    hparams = []
-    def log_trials(args, result):
-        print('Trial: ', args, 'Result:', result)
-        args_copy = dict(args)
-        args_copy['loss'] = result
-        hparams.append(args_copy)
+    trials = []
+
+    def log_trials(params, loss):
+        print('Trial: ', params, 'Loss:', loss)
+        params_copy = dict(params)
+        params_copy['loss'] = loss
+        trials.append(params_copy)
 
     hp_opt.add_callback(log_trials)
 
     result = hp_opt.minimize(train_f, n_calls=10)
     print(result)
 
-    parallel_coordinates_window(vis, hparams_to_parallel_coordinates(hparams), title='Hyperparameters')
+    parallel_coordinates_window(vis, dimensions=trials_to_dimensions(trials),
+                                title='Hyperparameters')
 
 
 if __name__ == '__main__':

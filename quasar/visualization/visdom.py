@@ -9,5 +9,5 @@ def create_plot_window(vis, x_label, y_label, title):
 
 
 def parallel_coordinates_window(vis, dimensions, title, line_color='blue'):
-    data = go.Parcoords(line=dict(color = line_color), dimensions=dimensions)
+    data = go.Parcoords(line=dict(color=line_color), dimensions=dimensions)
     return vis._send({'data': [data], 'layout': dict(title=title)})

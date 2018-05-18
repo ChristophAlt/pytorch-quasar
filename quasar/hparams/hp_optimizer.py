@@ -14,17 +14,17 @@ class HPOptimizer:
         self.static_args = vars(args)
         self.space = space
         self.random_state = np.random.RandomState(seed=random_state)
-        
+
         self.minimizer = gp_minimize if strategy == 'gp' else dummy_minimize
         self.callbacks = []
-    
+
     def _invoke_callbacks(self, args, result):
         for callback in self.callbacks:
             callback(args, result)
-    
+
     def add_callback(self, callback):
         self.callbacks.append(callback)
-    
+
     def minimize(self, func, n_calls):
         @use_named_args(self.space)
         def inner_func(**hp_args):
@@ -33,5 +33,5 @@ class HPOptimizer:
             result = func(Args(**combined_args))
             self._invoke_callbacks(hp_args, result)
             return result
-        
+
         return self.minimizer(inner_func, dimensions=self.space, n_calls=n_calls)

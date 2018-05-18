@@ -1,6 +1,6 @@
 import mock
 
-from quasar.datasets import conll_dataset, conll2003_dataset
+from quasar.datasets import conll2003_dataset
 from tests.datasets.utils import urlretrieve_side_effect
 
 directory = 'tests/_test_data/conll'
@@ -63,4 +63,4 @@ def test_conll2003_tag_scheme(mock_urlretrieve):
             'chunk': ['I-NP', 'I-NP'],
             'entity': ['S-LOC', 'O']
         }
-    ] 
+    ]
