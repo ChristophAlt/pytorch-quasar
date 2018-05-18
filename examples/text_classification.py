@@ -27,7 +27,7 @@ from quasar.nlp.encoders import LabelEncoder
 from quasar.nlp.utils.data.sampler import FlexibleBucketBatchSampler
 from quasar.train.train_model import train_model
 from quasar.train.utils import train_test_split_sampler
-from quasar.hparams.hyperopt import hparams_from_trials
+from quasar.hparams.hp_optimizer import HPOptimizer, Args
 from quasar.visualization.utils import hparams_to_parallel_coordinates
 from quasar.visualization.visdom import parallel_coordinates_window
 
@@ -79,34 +79,27 @@ def main():
     ROOT_DIR = os.path.join(str(Path.home()), '.torchtext')
 
     # define parameters and hyperparameters
-    parser = HyperOptArgumentParser(strategy='random_search')
-    
-    parser.add_argument('--data_dir', default=ROOT_DIR)
-    parser.add_argument('--vector_cache_dir', default=os.path.join(ROOT_DIR, 'vector_cache'))
-    parser.add_argument('--seed', type=int, default=1337)
-    parser.add_argument('--use_cuda', type=strtobool, default=torch.cuda.is_available())
-    parser.add_argument('--test_batch_size', type=int, default=128)
-    parser.add_argument('--dev_size', type=float, default=0.1)
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--log_interval', default=100)
-    parser.add_argument('--tune', type=strtobool, default=False)
-    parser.add_argument('--checkpoint', type=strtobool, default=True)
+    args = {
+        'data_dir': ROOT_DIR,
 
-    parser.add_argument('--bidirectional', type=strtobool, default=True)
-    parser.add_argument('--num_layers', type=int, default=1)
-    parser.add_argument('--word_vectors', default='glove.840B.300d')
-    parser.add_argument('--d_embedding', type=int, default=300)
-    parser.add_argument('--word_vectors_freeze', type=strtobool, default=True)
-    parser.add_argument('--early_stopping', type=strtobool, default=False)
-    
-    parser.opt_list('--batch_size', type=int, default=16, options=[8, 16, 32, 64, 128], tunable=True)
-    parser.opt_list('--lr', type=float, default=1e-3, options=[1e-1, 1e-2, 1e-3, 1e-4], tunable=True)
-    parser.opt_list('--momentum', type=float, default=.9, options=[.9], tunable=True)
+        'use_cuda': True,
+        'test_batch_size': 128,
+        'dev_size': 0.1,
+        'checkpoint': True,
+        'early_stopping': False,
+        'epochs': 5,
 
-    parser.opt_list('--d_hidden', type=int, default=128, options=[32, 64, 128, 256], tunable=True)
-    parser.opt_list('--dropout', type=float, default=.1, options=[.2, .3, .4, .5], tunable=True)
+        'd_embedding': 300,
+        'word_vectors': 'glove.840B.300d',
+        'word_vectors_freeze': True,
+        'vector_cache_dir': os.path.join(ROOT_DIR, 'vector_cache'),
 
-    args = parser.parse_args()
+        'momentum': .9,
+
+        'seed': 42
+    }
+
+    args = Args(**args)
 
     vis = visdom.Visdom()
     if not vis.check_connection():
@@ -137,10 +130,6 @@ def main():
                                                           test_size=args.dev_size,
                                                           random_state=args.seed)
 
-    class Args:
-        def __init__(self, **entries):
-            self.__dict__.update(entries)
-
     def delete_checkpoint(path):
         checkpoint_files = list(path.glob('checkpoint_model*.pth'))
         if checkpoint_files:
@@ -149,8 +138,6 @@ def main():
     # train function
     def train_f(config):
         print(config)
-
-        config = Args(**config)
 
         model_path = Path('/tmp/models/')
 
@@ -285,43 +272,34 @@ def main():
 
         test_evaluator.run(dev_loader)
         metrics = test_evaluator.state.metrics
-        return {'loss': metrics['nll'], 'status': STATUS_OK, 'hparams': vars(config)}
-
-    import numpy as np
-    from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
+        return metrics['nll']
 
     # hyperparameter tuning!
-    trials = Trials()
-    best = fmin(train_f,
-                space={
-                    'use_cuda': True,
-                    'test_batch_size': 128,
-                    'checkpoint': True,
-                    'early_stopping': False,
-                    'epochs': 30,
+    from skopt.space import Real, Integer, Categorical
 
-                    'd_embedding': 300,
-                    'word_vectors': 'glove.840B.300d',
-                    'word_vectors_freeze': True,
-                    'vector_cache_dir': os.path.join(ROOT_DIR, 'vector_cache'),
+    hp_opt = HPOptimizer(args=args,
+                         space=[
+                                Real(0.1, 0.5, name='dropout'),
+                                Categorical([50, 100, 150, 200], name='d_hidden'),
+                                Real(1e-4, 1, prior='log-uniform', name='lr'),
+                                Real(1e-3, 1, prior='log-uniform', name='lr_decay'),
+                                Categorical([4, 8, 16, 32, 64, 128], name='batch_size')
+                            ]
+                        )
 
-                    'dropout': hp.uniform('dropout', .1, .5),
-                    'd_hidden': hp.choice('d_hidden', (50, 100, 150, 200)),
+    hparams = []
+    def log_trials(args, result):
+        print('Trial: ', args, 'Result:', result)
+        args_copy = dict(args)
+        args_copy['loss'] = result
+        hparams.append(args_copy)
 
-                    'lr': hp.loguniform('lr', np.log(1e-4), np.log(1)),
-                    'lr_decay': hp.loguniform('lr_decay', np.log(1e-3), np.log(1)),
-                    'momentum': .9,
-                    'batch_size': hp.choice('batch_size', (4, 8, 16, 32, 64, 128))
-                },
-                algo=tpe.suggest,
-                max_evals=20,
-                trials=trials)
+    hp_opt.add_callback(log_trials)
 
-    hparams = hparams_from_trials(trials)
+    result = hp_opt.minimize(train_f, n_calls=10)
+    print(result)
+
     parallel_coordinates_window(vis, hparams_to_parallel_coordinates(hparams), title='Hyperparameters')
-
-    print(best)
-    print(trials.trials)
 
 
 if __name__ == '__main__':
