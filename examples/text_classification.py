@@ -27,6 +27,9 @@ from quasar.nlp.encoders import LabelEncoder
 from quasar.nlp.utils.data.sampler import FlexibleBucketBatchSampler
 from quasar.train.train_model import train_model
 from quasar.train.utils import train_test_split_sampler
+from quasar.hparams.hyperopt import hparams_from_trials
+from quasar.visualization.utils import hparams_to_parallel_coordinates
+from quasar.visualization.visdom import parallel_coordinates_window
 
 
 class LSTMClassifier(nn.Module):
@@ -134,8 +137,25 @@ def main():
                                                           test_size=args.dev_size,
                                                           random_state=args.seed)
 
+    class Args:
+        def __init__(self, **entries):
+            self.__dict__.update(entries)
+
+    def delete_checkpoint(path):
+        checkpoint_files = list(path.glob('checkpoint_model*.pth'))
+        if checkpoint_files:
+            os.remove(checkpoint_files[0])
+
     # train function
     def train_f(config):
+        print(config)
+
+        config = Args(**config)
+
+        model_path = Path('/tmp/models/')
+
+        delete_checkpoint(model_path)
+
         train_batch_sampler = FlexibleBucketBatchSampler(
             train, config.batch_size,
             sampler=train_sampler,
@@ -218,7 +238,7 @@ def main():
                                         device=device)
 
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optimizer, lambda epoch_: 1. / (1 + 0.05 * (epoch_ - 1)))
+            optimizer, lambda epoch_: 1. / (1 + config.lr_decay * (epoch_ - 1)))
 
         # scoring function for early stopping and checkpointing
         def score_function(engine):
@@ -249,7 +269,6 @@ def main():
                     visdom=vis)
 
         # load checkpointed (best) model and evaluate on test loader
-        model_path = Path('/tmp/models/')
         model = torch.load(list(model_path.glob('checkpoint_model*.pth'))[0])
 
         test_evaluator = \
@@ -264,14 +283,45 @@ def main():
         print("Test Results: Avg accuracy: {:.2f} Avg loss: {:.2f}".format(
             metrics['accuracy'], metrics['nll']))
 
+        test_evaluator.run(dev_loader)
+        metrics = test_evaluator.state.metrics
+        return {'loss': metrics['nll'], 'status': STATUS_OK, 'hparams': vars(config)}
+
+    import numpy as np
+    from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
+
     # hyperparameter tuning!
-    if args.tune:
-        for config in args.trials(20):
-            print(config)
-            train_f(config)
-    else:
-        print(vars(args))
-        train_f(args)
+    trials = Trials()
+    best = fmin(train_f,
+                space={
+                    'use_cuda': True,
+                    'test_batch_size': 128,
+                    'checkpoint': True,
+                    'early_stopping': False,
+                    'epochs': 30,
+
+                    'd_embedding': 300,
+                    'word_vectors': 'glove.840B.300d',
+                    'word_vectors_freeze': True,
+                    'vector_cache_dir': os.path.join(ROOT_DIR, 'vector_cache'),
+
+                    'dropout': hp.uniform('dropout', .1, .5),
+                    'd_hidden': hp.choice('d_hidden', (50, 100, 150, 200)),
+
+                    'lr': hp.loguniform('lr', np.log(1e-4), np.log(1)),
+                    'lr_decay': hp.loguniform('lr_decay', np.log(1e-3), np.log(1)),
+                    'momentum': .9,
+                    'batch_size': hp.choice('batch_size', (4, 8, 16, 32, 64, 128))
+                },
+                algo=tpe.suggest,
+                max_evals=20,
+                trials=trials)
+
+    hparams = hparams_from_trials(trials)
+    parallel_coordinates_window(vis, hparams_to_parallel_coordinates(hparams), title='Hyperparameters')
+
+    print(best)
+    print(trials.trials)
 
 
 if __name__ == '__main__':

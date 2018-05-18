@@ -2,7 +2,7 @@ import numpy as np
 
 from ignite.engine import Events
 
-from .visualization import create_plot_window
+from ..visualization.visdom import create_plot_window
 
 
 def train_model(model,
