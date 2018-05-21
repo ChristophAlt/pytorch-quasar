@@ -17,6 +17,7 @@ coverage
 
 # Mocking
 mock
+pytest_mock
 
 # Release to PyPi
 wheel
