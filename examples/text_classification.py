@@ -28,6 +28,7 @@ from quasar.train.utils import train_test_split_sampler
 from quasar.hparams.hp_optimizer import HPOptimizer, Args
 from quasar.visualization.utils import trials_to_dimensions
 from quasar.visualization.visdom import parallel_coordinates_window
+from quasar.logging import VisdomSummaryLogger
 
 
 class LSTMClassifier(nn.Module):
@@ -85,7 +86,7 @@ def main():
         'dev_size': 0.1,
         'checkpoint': True,
         'early_stopping': False,
-        'epochs': 5,
+        'epochs': 30,
 
         'd_embedding': 300,
         'word_vectors': 'glove.840B.300d',
@@ -132,6 +133,8 @@ def main():
         checkpoint_files = list(path.glob('checkpoint_model*.pth'))
         if checkpoint_files:
             os.remove(checkpoint_files[0])
+
+    visdom_logger = VisdomSummaryLogger()
 
     # train function
     def train_f(config):
@@ -221,6 +224,10 @@ def main():
                                             'nll': Loss(F.nll_loss)},
                                         device=device)
 
+        visdom_logger.attach_trainer(trainer)
+        visdom_logger.attach_evaluator(evaluator_train, trainer, phase='train')
+        visdom_logger.attach_evaluator(evaluator_dev, trainer, phase='dev')
+
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer, lambda epoch_: 1. / (1 + config.lr_decay * (epoch_ - 1)))
 
@@ -251,8 +258,7 @@ def main():
                     dev_loader=dev_loader,
                     lr_scheduler=lr_scheduler,
                     early_stopping=early_stopping if config.early_stopping else None,
-                    checkpoint=checkpoint if config.checkpoint else None,
-                    visdom=vis)
+                    checkpoint=checkpoint if config.checkpoint else None)
 
         # load checkpointed (best) model and evaluate on test loader
         model = torch.load(list(model_path.glob('checkpoint_model*.pth'))[0])
@@ -275,6 +281,7 @@ def main():
 
     # hyperparameter tuning!
     hp_opt = HPOptimizer(args=args,
+                         strategy='gp',
                          space=[
                                 Real(0.1, 0.5, name='dropout'),
                                 Categorical([50, 100, 150, 200], name='d_hidden'),

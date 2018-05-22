@@ -10,6 +10,7 @@ def test_hp_optimizer():
         return params.a - params.b * params.c + params.d
 
     trials = []
+
     def test_callback(params, result):
         trials.append((params, result))
         assert len(params) == 3
@@ -26,9 +27,9 @@ def test_hp_optimizer():
     hp_opt = HPOptimizer(args=static_params,
                          strategy='gp',
                          space=space)
-    
+
     hp_opt.add_callback(test_callback)
 
-    result = hp_opt.minimize(objective_func, n_calls=10)
+    hp_opt.minimize(objective_func, n_calls=10)
 
     assert len(trials) == 10
