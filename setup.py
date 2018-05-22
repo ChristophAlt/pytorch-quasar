@@ -37,7 +37,7 @@ setup_info = dict(
     long_description_content_type='text/markdown',
     license='BSD',
     install_requires=['numpy', 'pytorch-nlp', 'visdom', 'pytorch-ignite', 'plotly',
-                      'toolz'],
+                      'toolz', 'scikit-optimize'],
     dependency_links=[
             'git+https://github.com/ChristophAlt/ignite.git@master' +
             '#egg=pytorch-ignite-0.0.1a'
