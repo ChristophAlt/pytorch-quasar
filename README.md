@@ -1,5 +1,15 @@
 # PyTorch Quasar
 
+## Installation
+
+### As dependency in other projects
+``` pip install --process-dependency-links git+ssh://git@github.com/ChristophAlt/pytorch-quasar.git ```
+
+### Development
+Clone the repository, followed by:
+
+``` pip install -r requirements.txt ```
+
 ## Description
 
 PyTorch Quasar aims to provide a toolkit for quickly prototyping and evaluating deep learning models with PyTorch. In order to achieve this goal, the libary must provide the following functionalities.
@@ -33,7 +43,17 @@ samplers and metrics.
 - Docs: https://pytorchnlp.readthedocs.io/en/latest/
 
 #### ignite
+Ignite is a high-level library to help with training neural networks in PyTorch.
+
+- Github: https://github.com/pytorch/ignite
 
 #### skopt
+skopt is a library to minimize expensive and noisy black-box functions.
+
+- Github: https://github.com/scikit-optimize/scikit-optimize
+- Docs: https://scikit-optimize.github.io/
 
 #### visdom
+A flexible tool for creating, organizing, and sharing visualizations of live, rich data.
+
+- Github: https://github.com/facebookresearch/visdom
