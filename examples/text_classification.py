@@ -19,14 +19,15 @@ from torchnlp.utils import datasets_iterator, pad_batch
 from torchnlp.text_encoders import WhitespaceEncoder
 from torchnlp import word_to_vector
 
-from test_tube import HyperOptArgumentParser
-
-from distutils.util import strtobool
+from skopt.space import Real, Categorical
 
 from quasar.nlp.encoders import LabelEncoder
 from quasar.nlp.utils.data.sampler import FlexibleBucketBatchSampler
 from quasar.train.train_model import train_model
 from quasar.train.utils import train_test_split_sampler
+from quasar.hparams.hp_optimizer import HPOptimizer, Args
+from quasar.visualization.utils import trials_to_dimensions
+from quasar.visualization.visdom import parallel_coordinates_window
 
 
 class LSTMClassifier(nn.Module):
@@ -76,34 +77,27 @@ def main():
     ROOT_DIR = os.path.join(str(Path.home()), '.torchtext')
 
     # define parameters and hyperparameters
-    parser = HyperOptArgumentParser(strategy='random_search')
-    
-    parser.add_argument('--data_dir', default=ROOT_DIR)
-    parser.add_argument('--vector_cache_dir', default=os.path.join(ROOT_DIR, 'vector_cache'))
-    parser.add_argument('--seed', type=int, default=1337)
-    parser.add_argument('--use_cuda', type=strtobool, default=torch.cuda.is_available())
-    parser.add_argument('--test_batch_size', type=int, default=128)
-    parser.add_argument('--dev_size', type=float, default=0.1)
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--log_interval', default=100)
-    parser.add_argument('--tune', type=strtobool, default=False)
-    parser.add_argument('--checkpoint', type=strtobool, default=True)
+    args = {
+        'data_dir': ROOT_DIR,
 
-    parser.add_argument('--bidirectional', type=strtobool, default=True)
-    parser.add_argument('--num_layers', type=int, default=1)
-    parser.add_argument('--word_vectors', default='glove.840B.300d')
-    parser.add_argument('--d_embedding', type=int, default=300)
-    parser.add_argument('--word_vectors_freeze', type=strtobool, default=True)
-    parser.add_argument('--early_stopping', type=strtobool, default=False)
-    
-    parser.opt_list('--batch_size', type=int, default=16, options=[8, 16, 32, 64, 128], tunable=True)
-    parser.opt_list('--lr', type=float, default=1e-3, options=[1e-1, 1e-2, 1e-3, 1e-4], tunable=True)
-    parser.opt_list('--momentum', type=float, default=.9, options=[.9], tunable=True)
+        'use_cuda': True,
+        'test_batch_size': 128,
+        'dev_size': 0.1,
+        'checkpoint': True,
+        'early_stopping': False,
+        'epochs': 5,
 
-    parser.opt_list('--d_hidden', type=int, default=128, options=[32, 64, 128, 256], tunable=True)
-    parser.opt_list('--dropout', type=float, default=.1, options=[.2, .3, .4, .5], tunable=True)
+        'd_embedding': 300,
+        'word_vectors': 'glove.840B.300d',
+        'word_vectors_freeze': True,
+        'vector_cache_dir': os.path.join(ROOT_DIR, 'vector_cache'),
 
-    args = parser.parse_args()
+        'momentum': .9,
+
+        'seed': 42
+    }
+
+    args = Args(**args)
 
     vis = visdom.Visdom()
     if not vis.check_connection():
@@ -129,13 +123,22 @@ def main():
         row['text'] = text_encoder.encode(row['text'])
         row['label'] = label_encoder.encode(row['label'])
 
-    # compute train / dev split for dataloader
+    # create sampler for train / dev split used in dataloader
     train_sampler, dev_sampler = train_test_split_sampler(train,
                                                           test_size=args.dev_size,
                                                           random_state=args.seed)
 
+    def delete_checkpoint(path):
+        checkpoint_files = list(path.glob('checkpoint_model*.pth'))
+        if checkpoint_files:
+            os.remove(checkpoint_files[0])
+
     # train function
     def train_f(config):
+        model_path = Path('/tmp/models/')
+
+        delete_checkpoint(model_path)
+
         train_batch_sampler = FlexibleBucketBatchSampler(
             train, config.batch_size,
             sampler=train_sampler,
@@ -181,7 +184,8 @@ def main():
 
         if config.word_vectors:
             # Load word vectors
-            word_vectors = word_to_vector.aliases[config.word_vectors](cache=config.vector_cache_dir)
+            word_vectors = word_to_vector.aliases[config.word_vectors](
+                cache=config.vector_cache_dir)
             for i, token in enumerate(text_encoder.vocab):
                 embedding.weight.data[i] = word_vectors[token]
             print('Found vectors for %d tokens in vocabulary' %
@@ -218,7 +222,7 @@ def main():
                                         device=device)
 
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optimizer, lambda epoch_: 1. / (1 + 0.05 * (epoch_ - 1)))
+            optimizer, lambda epoch_: 1. / (1 + config.lr_decay * (epoch_ - 1)))
 
         # scoring function for early stopping and checkpointing
         def score_function(engine):
@@ -226,14 +230,16 @@ def main():
             return -dev_loss
 
         early_stopping = EarlyStopping(patience=15, score_function=score_function,
-                                        trainer=trainer)
+                                       trainer=trainer)
 
         def checkpoint_score_function(engine):
             dev_accuracy = engine.state.metrics['accuracy']
             return dev_accuracy
 
-        checkpoint = ModelCheckpoint('/tmp/models', 'checkpoint', score_function=checkpoint_score_function,
-                                     n_saved=1, create_dir=True, score_name="dev_accuracy")
+        checkpoint = ModelCheckpoint('/tmp/models', 'checkpoint',
+                                     score_function=checkpoint_score_function,
+                                     n_saved=1, create_dir=True,
+                                     score_name="dev_accuracy")
 
         # lets train!
         train_model(model=model,
@@ -249,7 +255,6 @@ def main():
                     visdom=vis)
 
         # load checkpointed (best) model and evaluate on test loader
-        model_path = Path('/tmp/models/')
         model = torch.load(list(model_path.glob('checkpoint_model*.pth'))[0])
 
         test_evaluator = \
@@ -264,14 +269,35 @@ def main():
         print("Test Results: Avg accuracy: {:.2f} Avg loss: {:.2f}".format(
             metrics['accuracy'], metrics['nll']))
 
+        test_evaluator.run(dev_loader)
+        metrics = test_evaluator.state.metrics
+        return metrics['nll']
+
     # hyperparameter tuning!
-    if args.tune:
-        for config in args.trials(20):
-            print(config)
-            train_f(config)
-    else:
-        print(vars(args))
-        train_f(args)
+    hp_opt = HPOptimizer(args=args,
+                         space=[
+                                Real(0.1, 0.5, name='dropout'),
+                                Categorical([50, 100, 150, 200], name='d_hidden'),
+                                Real(1e-4, 1, prior='log-uniform', name='lr'),
+                                Real(1e-3, 1, prior='log-uniform', name='lr_decay'),
+                                Categorical([4, 8, 16, 32, 64, 128], name='batch_size')
+                            ])
+
+    trials = []
+
+    def log_trials(params, loss):
+        print('Trial: ', params, 'Loss:', loss)
+        params_copy = dict(params)
+        params_copy['loss'] = loss
+        trials.append(params_copy)
+
+    hp_opt.add_callback(log_trials)
+
+    result = hp_opt.minimize(train_f, n_calls=10)
+    print(result)
+
+    parallel_coordinates_window(vis, dimensions=trials_to_dimensions(trials),
+                                title='Hyperparameters')
 
 
 if __name__ == '__main__':
