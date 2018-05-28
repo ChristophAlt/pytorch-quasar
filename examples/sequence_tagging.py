@@ -21,6 +21,7 @@ from torchnlp.utils import datasets_iterator, pad_batch, pad_tensor
 from torchnlp import word_to_vector
 from torchnlp.text_encoders import IdentityEncoder, CharacterEncoder, SubwordEncoder
 from torchnlp.text_encoders import PADDING_INDEX
+from torchnlp.word_to_vector.pretrained_word_vectors import _PretrainedWordVectors
 
 from skopt.space import Real, Categorical
 
@@ -45,7 +46,7 @@ def pad_nested_batch(batch, padding_index=PADDING_INDEX):
     lengths = [[len(t) for t in row] + [0] * (max_len_h - len(row)) for row in batch]
     batch = [row + [torch.LongTensor(max_len).fill_(padding_index)] * (max_len_h - len(row)) for row in batch]
 
-    padded = [[pad_tensor(t, max_len, padding_index) for t in row] for row in batch]
+    padded = torch.stack([torch.stack([pad_tensor(t, max_len, padding_index) for t in row]) for row in batch]).contiguous()
     return padded, lengths
 
 
@@ -55,15 +56,9 @@ def collate_fn(batch, train=True):
     subword_batch, subword_lengths = pad_nested_batch([ex['subword'] for ex in batch])
     label_batch, _ = pad_batch([ex['label'] for ex in batch])
 
-    # stack batches into single 2d / 3d input tensors
-    to_tensor = (lambda b: torch.stack(b).contiguous())
-    
-    to_tensor_nested = (
-        lambda b: torch.stack([torch.stack(x) for x in b]).contiguous())
-    
     return (text_batch, torch.LongTensor(text_lengths),
-            to_tensor_nested(char_batch), torch.LongTensor(char_lengths),
-            to_tensor_nested(subword_batch), torch.LongTensor(subword_lengths)), label_batch
+            char_batch, torch.LongTensor(char_lengths),
+            subword_batch, torch.LongTensor(subword_lengths)), label_batch
 
 
 def create_supervised_sequence_trainer(model, optimizer, parameters, device=None):
@@ -122,17 +117,17 @@ def main():
         'test_batch_size': 128,
         'dev_size': 0.1,
         'checkpoint': True,
-        'early_stopping': False,
+        'early_stopping': True,
         'epochs': 35,
-        'hp_tune': True,
+        'hp_tune': False,
 
         'dropout': 0.5,
         'batch_size': 16,
         'd_hidden': 100,
-        'lr': 0.015,
-        'lr_decay': 0.05,
+        'lr': 0.013,
+        'lr_decay': 0.002,
 
-        'use_word_embedding': False,
+        'use_word_embedding': True,
         'word_embedding_pretrained': 'german.model',
         'word_embedding_freeze': True,
         'word_embedding_dim': 300,
@@ -268,7 +263,7 @@ def main():
 
                 # if name refers to a location in the vector cache, load it
                 if os.path.isfile(os.path.join(config.vector_cache_dir, word_embedding_name)):
-                    word_vectors = _PretrainedEmbeddings(word_embedding_name, cache=config.vector_cache_dir)
+                    word_vectors = _PretrainedWordVectors(word_embedding_name, cache=config.vector_cache_dir)
                 # if name is an alias, load it
                 elif word_embedding_name in word_to_vector.aliases:
                     word_vectors = word_to_vector.aliases[word_embedding_name](cache=config.vector_cache_dir)
@@ -311,20 +306,19 @@ def main():
                                                      parameters=optimizer_params,
                                                      device=device)
 
+        metrics = {
+            'nll': Loss(lambda x, y: x, output_transform=lambda x: (x[0], x[2])),
+            'f1': F1Score(labels=f1_labels, output_transform=lambda x: (x[1], x[2]))
+            }
+
         evaluator_train = \
             create_supervised_sequence_evaluator(model,
-                                        metrics={
-                                            'nll': Loss(lambda x, y: x, output_transform=lambda x: (x[0], x[2])),
-                                            'f1': F1Score(labels=f1_labels, output_transform=lambda x: (x[1], x[2]))
-                                            },
+                                        metrics=metrics,
                                         device=device)
 
         evaluator_dev = \
             create_supervised_sequence_evaluator(model,
-                                        metrics={
-                                            'nll': Loss(lambda x, y: x, output_transform=lambda x: (x[0], x[1])),
-                                            'f1': F1Score(labels=f1_labels, output_transform=lambda x: (x[1], x[2]))
-                                            },
+                                        metrics=metrics,
                                         device=device)
 
         visdom_logger.attach_trainer(trainer)
@@ -339,7 +333,7 @@ def main():
             dev_loss = engine.state.metrics['nll']
             return -dev_loss
 
-        early_stopping = EarlyStopping(patience=15, score_function=score_function,
+        early_stopping = EarlyStopping(patience=5, score_function=score_function,
                                        trainer=trainer)
 
         def checkpoint_score_function(engine):
@@ -368,10 +362,7 @@ def main():
 
         test_evaluator = \
             create_supervised_sequence_evaluator(model,
-                                        metrics={
-                                            'nll': Loss(lambda x, y: x, output_transform=lambda x: (x[0], x[1])),
-                                            'f1': F1Score(labels=f1_labels, output_transform=lambda x: (x[1], x[2]))
-                                            },
+                                        metrics=metrics,
                                         device=device)
 
         test_evaluator.run(dev_loader)
