@@ -11,19 +11,15 @@ from .utils import sequence_mask
 
 class LSTMCRF(nn.Module):
     def __init__(self, crf, d_hidden, num_layers, dropout,
-                 word_embedding=None, char_embedding=None, subword_embedding=None):
+                 embedding_layer):
         super(LSTMCRF, self).__init__()
 
         self.crf = crf
-        self.word_embedding = word_embedding
-        self.char_embedding = char_embedding
-        self.subword_embedding = subword_embedding
+        self.embedding_layer = embedding_layer
 
         self.d_hidden = d_hidden
 
-        self.d_embedding = \
-            sum(emb.embedding_dim for emb in [word_embedding, char_embedding, subword_embedding]
-                if emb is not None)
+        self.d_embedding = self.embedding_layer.embedding_dim
 
         self.n_labels = self.crf.n_labels
 
@@ -70,10 +66,6 @@ class LSTMCRF(nn.Module):
         Returns:
             [batch_size, seq_len, word_dim] FloatTensor
         """
-
-        #res = [emb(x) for emb, x in zip(self.embeddings, xs)]
-        #x = torch.cat(res, 2)
-        
         emb_xs = self.word_embedding(xs) if self.word_embedding is not None else None
         emb_xc = self.char_embedding(xc, len_xc) if self.char_embedding is not None else None
         emb_xsub = self.subword_embedding(xsub, len_xsub) if self.subword_embedding is not None else None
@@ -82,51 +74,48 @@ class LSTMCRF(nn.Module):
         
         return x
 
-    def _forward_bilstm(self, xs, len_xs, xc, xsub, len_xc, len_xsub):
-        batch_size, seq_len = xs.size()
-
-        x = self._embeddings(xs, xc, xsub, len_xc, len_xsub)
-        x = x.view(-1, self.d_embedding)
+    def _forward_bilstm(self, input_, lengths):
+        x = self.embedding_layer(input_)
         x = self.relu(self.input_layer(x))
-        x = x.view(batch_size, seq_len, self.d_hidden)
 
         x = self.dropout(x)
-        #o, h = self._run_rnn_packed(self.lstm, x, lens)
-        o, h = self.lstm(x, len_xs)
+        o, h = self.lstm(x, lengths)
         o = self.dropout(o)
 
         o = o.contiguous()
-        o = o.view(-1, self.d_hidden_out)
         o = self.relu(self.output_layer(o))
-        o = o.view(batch_size, seq_len, self.n_labels)
 
         return o
 
-    def _bilstm_score(self, logits, y, len_xs):
+    def _bilstm_score(self, logits, y, lengths):
         y_exp = y.unsqueeze(-1)
         scores = torch.gather(logits, 2, y_exp).squeeze(-1)
-        mask = sequence_mask(len_xs).float()
+        mask = sequence_mask(lengths).float()
         scores = scores * mask
         score = scores.sum(1).squeeze(-1)
 
         return score
 
-    def score(self, xs, y, xc, len_xs, xsub, len_xc, len_xsub, logits=None):
-        if logits is None:
-            logits = self._forward_bilstm(xs, len_xs, xc, xsub, len_xc, len_xsub)
+    def score(self, input_, y, logits=None):
+        inputs, lengths = input_
 
-        transition_score = self.crf.transition_score(y, len_xs)
-        bilstm_score = self._bilstm_score(logits, y, len_xs)
+        if logits is None:
+            logits = self._forward_bilstm(inputs, lengths)
+
+        transition_score = self.crf.transition_score(y, lengths)
+        bilstm_score = self._bilstm_score(logits, y, lengths)
 
         score = transition_score + bilstm_score
 
         return score
 
-    def predict(self, xs, len_xs, xc, xsub, len_xc, len_xsub, use_crf, return_scores=False):
-        logits = self._forward_bilstm(xs, len_xs, xc, xsub, len_xc, len_xsub)
+    def predict(self, input_, use_crf, return_scores=False):
+        inputs, lengths = input_
+
+        logits = self._forward_bilstm(inputs, lengths)
         
         if use_crf:
-            scores, preds = self.crf.viterbi_decode(logits, len_xs)
+            scores, preds = self.crf.viterbi_decode(logits, lengths)
         else:
             scores, preds = torch.max(logits, dim=-1)
 
@@ -135,14 +124,16 @@ class LSTMCRF(nn.Module):
         else:
             return preds
 
-    def neg_log_likelihood(self, xs, y, len_xs, xc, xsub, len_xc, len_xsub, use_crf, return_logits=False):
-        batch_size, seq_len = xs.size()
+    def neg_log_likelihood(self, input_, y, use_crf, return_logits=False):
+        inputs, lengths = input_
         
-        logits = self._forward_bilstm(xs, len_xs, xc, xsub, len_xc, len_xsub)
+        logits = self._forward_bilstm(inputs, lengths)
+
+        batch_size, seq_len, _ = logits.size()
         
         if use_crf:
-            norm_score = self.crf(logits, len_xs)
-            sequence_score = self.score(xs, y, xc, len_xs, xsub, len_xc, len_xsub, logits=logits)
+            norm_score = self.crf(logits, lengths)
+            sequence_score = self.score(input_, y, logits=logits)
             loglik = -(sequence_score - norm_score)
         else:
             loglik = (F.cross_entropy(logits.view(-1, self.n_labels), y.view(-1), reduce=False)

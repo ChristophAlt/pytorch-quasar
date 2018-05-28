@@ -56,12 +56,6 @@ class CharEmbedding(nn.Module):
         
         self.dropout = nn.Dropout(dropout)
         
-        #self.lstm = nn.LSTM(input_size=d_emb,
-        #                    hidden_size=d_emb,
-        #                    num_layers=1,
-        #                    bidirectional=True,
-        #                    dropout=0,
-        #                    batch_first=True)
         self.lstm = BiLSTM(input_size=self.d_hidden, size=d_hidden)
 
     def forward(self, input, lengths):

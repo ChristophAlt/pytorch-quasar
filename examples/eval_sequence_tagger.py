@@ -46,10 +46,9 @@ def apply_model(model, example, text_encoder, label_encoder, collate_fn, gpu, us
     model.eval()
     with torch.autograd.no_grad():
         
-        (text, text_lengths, char, char_lengths, subword, subword_lengths), y = _prepare_batch(collate_fn([example]), device=device)
+        input_, y = _prepare_batch(collate_fn([example]), device=device)
         
-        y_pred = model.predict(text, text_lengths, char, subword,
-                               char_lengths, subword_lengths, use_crf=use_crf)
+        y_pred = model.predict(input_, use_crf=use_crf)
         
         pred_labels = [label_encoder.itos[index] for index in y_pred.cpu().numpy().tolist()[0]]
         true_labels = [label_encoder.itos[index] for index in y.cpu().numpy().tolist()[0]]

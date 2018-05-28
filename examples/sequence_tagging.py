@@ -37,6 +37,7 @@ from quasar.hparams.hp_optimizer import HPOptimizer, Args
 from quasar.visualization.utils import trials_to_dimensions
 from quasar.visualization.visdom import parallel_coordinates_window
 from quasar.train.metrics.f1_score import F1Score
+from quasar.modules.input.embedding_layer import EmbeddingLayer
 
 
 def pad_nested_batch(batch, padding_index=PADDING_INDEX):
@@ -56,24 +57,25 @@ def collate_fn(batch, train=True):
     subword_batch, subword_lengths = pad_nested_batch([ex['subword'] for ex in batch])
     label_batch, _ = pad_batch([ex['label'] for ex in batch])
 
-    return (text_batch, torch.LongTensor(text_lengths),
-            char_batch, torch.LongTensor(char_lengths),
-            subword_batch, torch.LongTensor(subword_lengths)), label_batch
+    return (({
+        'text': text_batch,
+        'char': (char_batch, torch.LongTensor(char_lengths)),
+        'subword': (subword_batch, torch.LongTensor(subword_lengths))
+    }, torch.LongTensor(text_lengths)), label_batch)
 
 
 def create_supervised_sequence_trainer(model, optimizer, parameters, device=None):
     def _update(engine, batch):
         model.train()
         optimizer.zero_grad()
-        (text, text_lengths, char, char_lengths, 
-         subword, subword_lengths), label = _prepare_batch(batch, device=device)
-        nll = model.neg_log_likelihood(text, label, text_lengths, char, subword, 
-                                       char_lengths, subword_lengths, use_crf=True)
+        input_, label = _prepare_batch(batch, device=device)
+        _, lengths = input_
+        nll = model.neg_log_likelihood(input_, label, use_crf=True)
         loss = nll.mean()
         loss.backward()
         nn.utils.clip_grad_norm_(parameters, 5.)
         optimizer.step()
-        return (nll / text_lengths.float()).mean().item()
+        return (nll / lengths.float()).mean().item()
 
     return Engine(_update)
 
@@ -82,13 +84,11 @@ def create_supervised_sequence_evaluator(model, metrics={}, device=None):
     def _inference(engine, batch):
         model.eval()
         with torch.no_grad():
-            (text, text_lengths, char, char_lengths, 
-             subword, subword_lengths), label = _prepare_batch(batch, device=device)
-            y_pred = model.predict(text, text_lengths, char, subword,
-                                   char_lengths, subword_lengths, use_crf=True)
-            nll = model.neg_log_likelihood(text, label, text_lengths, char, subword, 
-                                           char_lengths, subword_lengths, use_crf=True)
-            return (nll / text_lengths.float()).mean(), y_pred, label
+            input_, label = _prepare_batch(batch, device=device)
+            _, lengths = input_
+            y_pred = model.predict(input_, use_crf=True)
+            nll = model.neg_log_likelihood(input_, label, use_crf=True)
+            return (nll / lengths.float()).mean(), y_pred, label
 
     engine = Engine(_inference)
 
@@ -246,12 +246,13 @@ def main():
             pin_memory=config.use_cuda,
             num_workers=0)
 
+        embedding_modules = {}
+
         if config.use_char_embedding:
             char_embedding = ConvCharEmbedding(d_vocab=character_encoder.vocab_size,
                                                d_emb=config.char_embedding_dim,
                                                conv_width=config.char_embedding_conv_width)
-        else:
-            char_embedding = None
+            embedding_modules['char'] = char_embedding
 
         if config.use_word_embedding:
             word_embedding = Embedding(d_vocab=text_encoder.vocab_size,
@@ -275,24 +276,23 @@ def main():
                     len([t for t in text_encoder.vocab if t in word_vectors.stoi]))
                 for i, token in enumerate(text_encoder.vocab):
                     word_embedding.embedding.weight.data[i] = word_vectors[token]
-            
-        else:
-            word_embedding = None
+            embedding_modules['text'] = word_embedding
         
         if config.use_subword_embedding:
             subword_embedding = ConvCharEmbedding(d_vocab=subword_encoder.vocab_size,
                                                   d_emb=config.subword_embedding_dim,
                                                   conv_width=config.subword_embedding_conv_width)
-        else:
-            subword_embedding = None
+            embedding_modules['subword'] = subword_embedding
+
+        embedding_layer = EmbeddingLayer(embedding_modules)
 
         crf = CRF(vocab_size=label_encoder.vocab_size)
 
         model = LSTMCRF(crf=crf, d_hidden=config.d_hidden, num_layers=1,
                         dropout=config.dropout,
-                        word_embedding=word_embedding,
-                        char_embedding=char_embedding,
-                        subword_embedding=subword_embedding)
+                        embedding_layer=embedding_layer)
+
+        print(model)
 
         model.to(device=device)
 
