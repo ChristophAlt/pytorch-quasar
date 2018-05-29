@@ -17,10 +17,9 @@ from ignite.metrics import CategoricalAccuracy, Loss
 
 from torchnlp.datasets import trec_dataset
 from torchnlp.samplers import BucketBatchSampler
-from torchnlp.utils import datasets_iterator, pad_batch, pad_tensor
+from torchnlp.utils import datasets_iterator, pad_batch
 from torchnlp import word_to_vector
 from torchnlp.text_encoders import IdentityEncoder, CharacterEncoder, SubwordEncoder
-from torchnlp.text_encoders import PADDING_INDEX
 from torchnlp.word_to_vector.pretrained_word_vectors import _PretrainedWordVectors
 
 from skopt.space import Real, Categorical
@@ -38,17 +37,7 @@ from quasar.visualization.utils import trials_to_dimensions
 from quasar.visualization.visdom import parallel_coordinates_window
 from quasar.train.metrics.f1_score import F1Score
 from quasar.modules.input.embedding_layer import EmbeddingLayer
-
-
-def pad_nested_batch(batch, padding_index=PADDING_INDEX):
-    max_len_h = max([len(row) for row in batch])
-    max_len = max([len(t) for row in batch for t in row])
-
-    lengths = [[len(t) for t in row] + [0] * (max_len_h - len(row)) for row in batch]
-    batch = [row + [torch.LongTensor(max_len).fill_(padding_index)] * (max_len_h - len(row)) for row in batch]
-
-    padded = torch.stack([torch.stack([pad_tensor(t, max_len, padding_index) for t in row]) for row in batch]).contiguous()
-    return padded, lengths
+from quasar.nlp.utils.batching import pad_nested_batch
 
 
 def collate_fn(batch, train=True):
@@ -58,7 +47,7 @@ def collate_fn(batch, train=True):
     label_batch, _ = pad_batch([ex['label'] for ex in batch])
 
     return (({
-        'text': text_batch,
+        #'text': text_batch,
         'char': (char_batch, torch.LongTensor(char_lengths)),
         'subword': (subword_batch, torch.LongTensor(subword_lengths))
     }, torch.LongTensor(text_lengths)), label_batch)
@@ -127,7 +116,7 @@ def main():
         'lr': 0.013,
         'lr_decay': 0.002,
 
-        'use_word_embedding': True,
+        'use_word_embedding': False,
         'word_embedding_pretrained': 'german.model',
         'word_embedding_freeze': True,
         'word_embedding_dim': 300,
@@ -143,7 +132,7 @@ def main():
         'subword_embedding_pretrained': None,
         'subword_embedding_freeze': False,
         'subword_embedding_conv_width': 3,
-        'subword_embedding_dim': 50,
+        'subword_embedding_dim': 30,
 
         'use_crf': True,
 
@@ -176,7 +165,7 @@ def main():
     text_encoder = IdentityEncoder(text_corpus)
 
     subword_corpus = [token for ex in datasets_iterator(train, dev) for token in ex['text']]
-    subword_encoder = SubwordEncoder(subword_corpus, target_vocab_size=750)
+    subword_encoder = SubwordEncoder(subword_corpus, target_vocab_size=500)
     
     character_corpus = [token for ex in datasets_iterator(train, dev) for token in ex['text']]
     character_encoder = CharacterEncoder(character_corpus)
@@ -313,13 +302,13 @@ def main():
 
         evaluator_train = \
             create_supervised_sequence_evaluator(model,
-                                        metrics=metrics,
-                                        device=device)
+                                                 metrics=metrics,
+                                                 device=device)
 
         evaluator_dev = \
             create_supervised_sequence_evaluator(model,
-                                        metrics=metrics,
-                                        device=device)
+                                                 metrics=metrics,
+                                                 device=device)
 
         visdom_logger.attach_trainer(trainer)
         visdom_logger.attach_evaluator(evaluator_train, trainer, phase='train')
