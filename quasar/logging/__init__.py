@@ -1,5 +1,7 @@
-from quasar.logging.summary_logger import VisdomSummaryLogger
+from quasar.logging.visdom_summary_logger import VisdomRunSummaryLogger
+from quasar.logging.db_summary_logger import DBRunSummaryLogger
 
 __all__ = [
-    'VisdomSummaryLogger'
+    'VisdomRunSummaryLogger',
+    'DBRunSummaryLogger'
 ]
