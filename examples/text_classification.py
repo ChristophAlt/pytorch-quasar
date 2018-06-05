@@ -26,9 +26,7 @@ from quasar.nlp.utils.data.sampler import FlexibleBucketBatchSampler
 from quasar.train.train_model import train_model
 from quasar.train.utils import train_test_split_sampler
 from quasar.hparams.hp_optimizer import HPOptimizer, Args
-from quasar.visualization.utils import trials_to_dimensions
-from quasar.visualization.visdom import parallel_coordinates_window
-from quasar.logging import VisdomSummaryLogger
+from quasar.logging import VisdomRunSummaryLogger
 
 
 class LSTMClassifier(nn.Module):
@@ -86,7 +84,7 @@ def main():
         'dev_size': 0.1,
         'checkpoint': True,
         'early_stopping': False,
-        'epochs': 30,
+        'epochs': 5,
 
         'd_embedding': 300,
         'word_vectors': 'glove.840B.300d',
@@ -95,7 +93,9 @@ def main():
 
         'momentum': .9,
 
-        'seed': 42
+        'seed': 42,
+
+        'visdom_env': 'main',
     }
 
     args = Args(**args)
@@ -134,10 +134,19 @@ def main():
         if checkpoint_files:
             os.remove(checkpoint_files[0])
 
-    visdom_logger = VisdomSummaryLogger()
+    visdom_logger = VisdomRunSummaryLogger(env=args.visdom_env, clear_batch_summary=True)
+
+    # TODO: abstract this part
+    run_config = {'run': 0}
 
     # train function
     def train_f(config):
+
+        run_name = 'run_%d' % run_config['run']
+        run_config['run'] = run_config['run'] + 1
+
+        visdom_logger.new_run(run_name)
+
         model_path = Path('/tmp/models/')
 
         delete_checkpoint(model_path)
@@ -290,21 +299,10 @@ def main():
                                 Categorical([4, 8, 16, 32, 64, 128], name='batch_size')
                             ])
 
-    trials = []
-
-    def log_trials(params, loss):
-        print('Trial: ', params, 'Loss:', loss)
-        params_copy = dict(params)
-        params_copy['loss'] = loss
-        trials.append(params_copy)
-
-    hp_opt.add_callback(log_trials)
+    hp_opt.add_callback(visdom_logger.run_summary)
 
     result = hp_opt.minimize(train_f, n_calls=10)
     print(result)
-
-    parallel_coordinates_window(vis, dimensions=trials_to_dimensions(trials),
-                                title='Hyperparameters')
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 import pytest
 
-from quasar.logging import VisdomSummaryLogger
+from quasar.logging import VisdomRunSummaryLogger
 from ignite.engine import Events
 
 
@@ -13,7 +13,7 @@ def mocked_visdom(mocker):
 
 
 def test_visdom_summary_logger_attach_trainer(mocked_visdom, mocker):
-    logger = VisdomSummaryLogger()
+    logger = VisdomRunSummaryLogger()
 
     engine = mocker.MagicMock()
 
@@ -31,7 +31,7 @@ def test_visdom_summary_logger_attach_trainer(mocked_visdom, mocker):
 
 
 def test_visdom_summary_logger_attach_evaluator(mocked_visdom, mocker):
-    logger = VisdomSummaryLogger()
+    logger = VisdomRunSummaryLogger()
 
     engine = mocker.MagicMock()
 
