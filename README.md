@@ -26,6 +26,7 @@ On top of the training framework, hyperparameter optimization capabilities are p
 
 #### Visualization
 Visualizing the training progress and results of the hyperparameter tuning are an essential part of a machine learning pipeline and must be available out of the box.
+<p align="center"><img width="55%" src="docs/_static/img/visualization.png" /></p>
 
 #### Experiment tracking
 Persisting experiment results (e.g. hyperparameter tuning) is important to keep track of progress and already explored parameter configurations.
